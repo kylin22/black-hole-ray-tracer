@@ -52,8 +52,8 @@ def main():
 
     # compile
     program = context.program(
-        vertex_shader=load_shader("render/shaders/test.vert"),
-        fragment_shader=load_shader("render/shaders/test.frag"),
+        vertex_shader=load_shader("shaders/test.vert"),
+        fragment_shader=load_shader("shaders/test.frag"),
     )
 
     vertices = np.array([
