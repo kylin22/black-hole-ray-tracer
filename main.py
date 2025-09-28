@@ -21,7 +21,14 @@ class Ray:
         self.position = initial_position
         self.velocity = initial_velocity
         self.trail = [initial_position] 
+
+        # preallocate trail variables
         self.max_trail = max_trail
+        self.trail = np.zeros((max_trail, 2), dtype='f4')  # preallocate
+        self.trail_alpha = np.linspace(0, 1, max_trail, dtype='f4')
+        self.trail_index = 0
+        self.trail_full = False
+        self.trail[self.trail_index] = initial_position
 
     def physical_to_normalized(self, physical_position: tuple[float, float]):
         x, y = physical_position
@@ -37,11 +44,20 @@ class Ray:
         y += vy * dt
         self.position = (x, y)
 
-        # update trail (FIFO)
+        # update trail in circular buffer
         normalised_position = self.physical_to_normalized(self.position)
-        self.trail.append(normalised_position)
-        if len(self.trail) > self.max_trail:
-            self.trail.pop(0)
+        self.trail_index = (self.trail_index + 1) % self.max_trail
+        self.trail[self.trail_index] = normalised_position
+        if self.trail_index == 0:
+            self.trail_full = True
+
+    def get_trail_data(self):
+        if self.trail_full:
+            # return oldest to newest
+            return np.vstack((self.trail[self.trail_index + 1:], self.trail[:self.trail_index + 1]))
+        else:
+            # only return filled part
+            return self.trail[:self.trail_index + 1]
 
 def load_shader(path: str) -> str:
     shader_path = Path(path)
@@ -85,7 +101,7 @@ def main():
 
     # create photons along left edge
     PHOTON_NUMBER = 100
-    MAX_TRAIL = 200
+    MAX_TRAIL = 800
     y_positions = np.linspace(-1.0 * PHYSICAL_HEIGHT, 1.0 * PHYSICAL_HEIGHT, PHOTON_NUMBER)
     x_initial = -1.0 * PHYSICAL_WIDTH
     photons = []
@@ -118,11 +134,11 @@ def main():
         buffer_data = []
         for photon in photons:
             photon.step(0.5)
-            positions = np.array(photon.trail, dtype='f4')
-            alphas = np.linspace(0.0, 1.0, len(photon.trail), dtype='f4')[:, None]
+            positions = photon.get_trail_data()
+            alphas = np.linspace(0.0, 1.0, len(positions), dtype='f4')[:, None]
             buffer_data = np.hstack([positions, alphas]).astype('f4').tobytes()
             trail_buffer.write(buffer_data)
-            trail_array.render(moderngl.LINE_STRIP, vertices=len(photon.trail))
+            trail_array.render(moderngl.LINE_STRIP, vertices=len(positions))
 
         glfw.swap_buffers(window)
         glfw.poll_events()
