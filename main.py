@@ -30,7 +30,7 @@ class Ray:
         self.trail_full = False
         self.trail[self.trail_index] = initial_position
 
-    def physical_to_normalized(self, physical_position: tuple[float, float]):
+    def physical_to_normalized(self, physical_position: tuple[float, float]) -> tuple[float, float]:
         x, y = physical_position
         normalised_x = (x - PHYSICAL_CENTER[0]) / PHYSICAL_WIDTH
         normalised_y = (y - PHYSICAL_CENTER[1]) / PHYSICAL_HEIGHT
@@ -51,7 +51,7 @@ class Ray:
         if self.trail_index == 0:
             self.trail_full = True
 
-    def get_trail_data(self):
+    def get_trail_data(self) -> np.ndarray:
         if self.trail_full:
             # return oldest to newest
             return np.vstack((self.trail[self.trail_index + 1:], self.trail[:self.trail_index + 1]))
