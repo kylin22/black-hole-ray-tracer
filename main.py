@@ -3,57 +3,70 @@ import moderngl
 import numpy as np
 from pathlib import Path
 
-c = 299792458.0
-G = 6.67430e-11
+LIGHT_SPEED = 299792458.0
+GRAVITATIONAL_CONSTANT = 6.67430e-11
 
 # physical dimensions for the simulation in meters
-physical_width = 1e11
-physical_height = 7.5e10
-physical_center = (0.0, 0.0)
+PHYSICAL_WIDTH = 1e11
+PHYSICAL_HEIGHT = 7.5e10
+PHYSICAL_CENTER = (0.0, 0.0)
 
 class BlackHole:
     def __init__(self, position: tuple[float, float], mass: float):
         self.position = position
-        self.radius = mass * 2 * G / c**2  # Schwarzschild radius
+        self.radius = mass * 2 * GRAVITATIONAL_CONSTANT / (LIGHT_SPEED ** 2) # Schwarzschild radius
 
-class Particle:
-    def __init__(self, initial_position: tuple[float, float], initial_velocity: tuple[float, float], steps: int, dt: float):
+class Ray:
+    def __init__(self, initial_position: tuple[float, float], initial_velocity: tuple[float, float], max_trail: int):
+        self.position = initial_position
         self.velocity = initial_velocity
-        self.path = [initial_position] 
+        self.trail = [initial_position] 
+        self.max_trail = max_trail
 
-        position = initial_position
+    def physical_to_normalized(self, physical_position: tuple[float, float]):
+        x, y = physical_position
+        normalised_x = (x - PHYSICAL_CENTER[0]) / PHYSICAL_WIDTH
+        normalised_y = (y - PHYSICAL_CENTER[1]) / PHYSICAL_HEIGHT
+        return (normalised_x, normalised_y)
 
-        for _ in range(steps):
-            x, y = position
-            vx, vy = self.velocity
-            x += vx * dt
-            y += vy * dt
-            position = (x, y)
-            self.path.append(position)
+    def step(self, dt: float):
+        # update position
+        x, y = self.position
+        vx, vy = self.velocity
+        x += vx * dt
+        y += vy * dt
+        self.position = (x, y)
+
+        # update trail (FIFO)
+        normalised_position = self.physical_to_normalized(self.position)
+        self.trail.append(normalised_position)
+        if len(self.trail) > self.max_trail:
+            self.trail.pop(0)
 
 def load_shader(path: str) -> str:
     shader_path = Path(path)
     if not shader_path.exists():
-        raise FileNotFoundError(f"Shader file not found: {path}")
+        raise FileNotFoundError(f"there aint no file at: {path}")
     return shader_path.read_text()
 
 def main():
+    # initialise window
     if not glfw.init():
-        raise Exception("GLFW could not initialize.")
+        raise Exception("GLFW could not initialize")
 
     window = glfw.create_window(800, 600, "Black Hole Ray Tracer", None, None)
     if not window:
         glfw.terminate()
         return
-    
+
     # initialise context
     glfw.make_context_current(window)
     context = moderngl.create_context()
 
-    # compile
-    program = context.program(
-        vertex_shader=load_shader("shaders/test.vert"),
-        fragment_shader=load_shader("shaders/test.frag"),
+    # setup shader programs
+    main_program = context.program(
+        vertex_shader=load_shader("shaders/main.vert"),
+        fragment_shader=load_shader("shaders/main.frag"),
     )
 
     vertices = np.array([
@@ -63,43 +76,56 @@ def main():
     ], dtype="f4")
 
     vertex_buffer = context.buffer(vertices.tobytes())
-    vertex_array = context.simple_vertex_array(program, vertex_buffer, "vertex")
+    vertex_array = context.vertex_array(main_program, vertex_buffer, "vertexPosition")
 
+    trail_program = context.program(
+        vertex_shader=load_shader("shaders/trail.vert"),
+        fragment_shader=load_shader("shaders/trail.frag"),
+    )
+
+    # create photons along left edge
+    PHOTON_NUMBER = 100
+    MAX_TRAIL = 200
+    y_positions = np.linspace(-1.0 * PHYSICAL_HEIGHT, 1.0 * PHYSICAL_HEIGHT, PHOTON_NUMBER)
+    x_initial = -1.0 * PHYSICAL_WIDTH
+    photons = []
+    for y in y_positions:
+        photons.append(Ray(
+            initial_position=(x_initial, y),
+            initial_velocity=(LIGHT_SPEED, 0.0),
+            max_trail=MAX_TRAIL
+        ))
+
+    trail_buffer = context.buffer(reserve = PHOTON_NUMBER * MAX_TRAIL * 3 * 4)  # max_trail * (2 coordinates + 1 alpha) * 4 bytes per float
+    trail_array = context.vertex_array(trail_program, trail_buffer, "vertexPosition", "inTrailAlpha")
+
+    # create black hole
     sagittarius_a = BlackHole(position=(0.75, 0.5), mass=8.54e36) 
-    test_particle = Particle(initial_position=(-0.5 * physical_width, 0.0), initial_velocity=(c, 0.0), steps=500, dt=1)
-
-    def physical_to_normalized(position):
-        x, y = position
-        normalised_x = 0.5 + (x - physical_center[0]) / physical_width
-        normalised_y = 0.5 + (y - physical_center[1]) / physical_height
-        return (normalised_x, normalised_y)
-
-    particle_screen_path = [
-        physical_to_normalized(point)
-        for point in test_particle.path
-    ]
-
-    index = 0
 
     while not glfw.window_should_close(window):
         context.clear(0.0, 0.0, 0.0)
+        context.enable(moderngl.BLEND)
+        context.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA)
         context.viewport = (0, 0, 800, 600)
 
-        program["u_resolution"].value = (800.0, 600.0)
-        program["u_center"].value = sagittarius_a.position
-        program["u_radius"].value = sagittarius_a.radius / physical_width
-        program["u_particle_position"].value = particle_screen_path[index]
-        program["u_particle_radius"].value = 0.01
-        
+        main_program["uResolution"].value = (800.0, 600.0)
+        main_program["uCenter"].value = sagittarius_a.position
+        main_program["uRadius"].value = sagittarius_a.radius / PHYSICAL_WIDTH
+
         vertex_array.render(moderngl.TRIANGLES)
+        
+        # update photons and photon trails once
+        buffer_data = []
+        for photon in photons:
+            photon.step(0.5)
+            positions = np.array(photon.trail, dtype='f4')
+            alphas = np.linspace(0.0, 1.0, len(photon.trail), dtype='f4')[:, None]
+            buffer_data = np.hstack([positions, alphas]).astype('f4').tobytes()
+            trail_buffer.write(buffer_data)
+            trail_array.render(moderngl.LINE_STRIP, vertices=len(photon.trail))
 
         glfw.swap_buffers(window)
         glfw.poll_events()
-
-        index += 1
-        if index >= len(test_particle.path):
-            index = 0
-
 
     glfw.terminate()
 
