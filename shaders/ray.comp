@@ -1,0 +1,80 @@
+#version 430
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(rgba32f, binding = 0) uniform writeonly image2D image;
+
+uniform ivec2 uResolution;
+uniform vec3 uCameraPosition;
+uniform float uFOV;
+uniform vec3 uSpherePosition;
+uniform float uSphereRadius;
+uniform vec3 uLightDir;
+uniform float uAmbient;
+
+// test ray methods with basic sphere intersection
+float intersect_sphere(vec3 rayOrigin, vec3 rayDirection, vec3 sphereCenter, float sphereRadius) {
+    vec3 originToCenter = rayOrigin - sphereCenter;
+
+    // quadratic discriminant
+    float b = dot(originToCenter, rayDirection);
+    float c = dot(originToCenter, originToCenter) - sphereRadius * sphereRadius;
+    float discriminant = b * b - c;
+    
+    if (discriminant < 0.0) return -1.0;
+
+    // compute two possible intersection distances
+    float sqrtdiscriminant = sqrt(discriminant);
+    float r1 = -b - sqrtdiscriminant;
+    float r2 = -b + sqrtdiscriminant;
+
+    // return the nearest positive intersection
+    if (r1 > 1e-4) return r1; // using a small epsilon to avoid possibility of self intersection
+    if (r2 > 1e-4) return r2;
+    return -1.0;
+}
+
+void main() {
+    ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
+    if (gid.x >= uResolution.x || gid.y >= uResolution.y) return;
+
+    // normalised device coodinates
+    float nx = (float(gid.x) + 0.5) / float(uResolution.x) * 2.0 - 1.0;
+    float ny = (float(gid.y) + 0.5) / float(uResolution.y) * 2.0 - 1.0;
+    float aspect = float(uResolution.x) / float(uResolution.y);
+
+    // camera ray direction
+    float scale = tan(radians(max(uFOV, 1.0)) * 0.5);
+    vec3 rayDirection = normalize(vec3(nx * aspect * scale, -ny * scale, 1.0)); // flip y for opengl coordinates
+
+    vec3 rayOrigin = uCameraPosition;
+
+    float intersectDistance = intersect_sphere(rayOrigin, rayDirection, uSpherePosition, uSphereRadius);
+
+    vec4 fragColor;
+    if (intersectDistance > 0.0) {
+        vec3 intersectPoint = rayOrigin + rayDirection * intersectDistance;
+        vec3 normal = normalize(intersectPoint - uSpherePosition);
+
+        // simple lighting
+        vec3 lightDirection = normalize(uLightDir);
+        float diffuseFactor = max(dot(normal, -lightDirection), 0.0);
+        float lighting = uAmbient + (1.0 - uAmbient) * diffuseFactor;
+        vec3 sphereColor = vec3(1.0, 0.0, 0.0); // test red sphere
+        vec3 shadedColor = sphereColor * lighting;
+
+        // rim lighting
+        float rimFactor = pow(max(0.0, 1.0 - dot(rayDirection, normal)), 2.0);
+        shadedColor += vec3(0.2) * rimFactor;
+        fragColor = vec4(clamp(shadedColor, 0.0, 1.0), 1.0);
+    } else {
+        // test "sky" gradient
+        float skyFactor = 0.5 * (rayDirection.y + 1.0);
+        vec3 skyBottom = vec3(0.1, 0.12, 0.18);
+        vec3 skyTop = vec3(0.6, 0.7, 0.9);
+        vec3 sky = mix(skyBottom, skyTop, clamp(skyFactor, 0.0, 1.0));
+        fragColor = vec4(sky, 1.0);
+    }
+
+    imageStore(image, gid, fragColor);
+}
