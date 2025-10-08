@@ -5,12 +5,19 @@ layout(local_size_x = 16, local_size_y = 16) in;
 layout(rgba32f, binding = 0) uniform writeonly image2D image;
 
 uniform ivec2 uResolution;
+uniform sampler2D uBackground;
 uniform vec3 uCameraPosition;
 uniform float uFOV;
 uniform vec3 uSpherePosition;
 uniform float uSphereRadius;
 uniform vec3 uLightDir;
 uniform float uAmbient;
+
+vec2 direction_to_equirect_uv(vec3 direction) {
+    float u = 0.5 + atan(direction.z, direction.x) / (2.0 * 3.14159265359);
+    float v = 0.5 - asin(direction.y) / 3.14159265359;
+    return vec2(u, v);
+}
 
 // test ray methods with basic sphere intersection
 float intersect_sphere(vec3 rayOrigin, vec3 rayDirection, vec3 sphereCenter, float sphereRadius) {
@@ -68,12 +75,9 @@ void main() {
         shadedColor += vec3(0.2) * rimFactor;
         fragColor = vec4(clamp(shadedColor, 0.0, 1.0), 1.0);
     } else {
-        // test "sky" gradient
-        float skyFactor = 0.5 * (rayDirection.y + 1.0);
-        vec3 skyBottom = vec3(0.1, 0.12, 0.18);
-        vec3 skyTop = vec3(0.6, 0.7, 0.9);
-        vec3 sky = mix(skyBottom, skyTop, clamp(skyFactor, 0.0, 1.0));
-        fragColor = vec4(sky, 1.0);
+        vec2 uv = direction_to_equirect_uv(rayDirection);
+        vec3 bgColor = texture(uBackground, uv).rgb;
+        fragColor = vec4(bgColor, 1.0);
     }
 
     imageStore(image, gid, fragColor);

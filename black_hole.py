@@ -1,10 +1,12 @@
-# main.py
 import glfw
 import moderngl
 import numpy as np
 from pathlib import Path
 from time import time
+from PIL import Image
+from pyquaternion import Quaternion
 
+# Window
 WINDOW_WIDTH = 800
 WINDOW_HEIGHT = 600
 
@@ -47,13 +49,24 @@ def main():
     vao = context.vertex_array(program, vbo, "vertexPosition")
 
     # the texture for the compute shader
-    compute_texture = context.texture((WINDOW_WIDTH, WINDOW_HEIGHT), components=4, dtype="f4")
+    compute_texture = context.texture((WINDOW_WIDTH, WINDOW_HEIGHT), 4, dtype="f4")
     compute_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
 
     compute_texture.bind_to_image(0, read=False, write=True)
 
-    # compute shader uniforms (camera + sphere)
+    #load background image
+    BG_IMAGE = Image.open("assets/starmap_8k.jpg").convert("RGBA")
+    BG_IMAGE_width, BG_IMAGE_height = BG_IMAGE.size
+    bg_transposed = BG_IMAGE.transpose(Image.FLIP_TOP_BOTTOM)
+    bg_tex = context.texture((BG_IMAGE_width, BG_IMAGE_height), 4, bg_transposed.tobytes())
+    bg_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+    bg_tex.repeat_x = True
+    bg_tex.repeat_y = True
+    bg_tex.use(location=1)
+
+    # compute shader uniforms
     ray_compute["uResolution"].value = (WINDOW_WIDTH, WINDOW_HEIGHT)
+    ray_compute["uBackground"].value = 1
 
     ray_compute["uCameraPosition"].value = (0.0, 0.0, -3.0)
     ray_compute["uFOV"].value = 60.0  # degrees
